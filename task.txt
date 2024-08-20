@@ -1,0 +1,97 @@
+##################################################__Основная_команда_добавления_образа_в_киберинфраструктуру_#####################################################
+Создание образа в Киберинраструктуре
+vinfra service compute image create --file /media/redos-8-20240218.1-Everything-x86_64-DVD1.iso redos-8-20240218.1-Everything-x86_64-DVD1.iso
+##################################################################################################################################################################
+wget --user Tukhvatullin --password 'Tuhvatullin53' https://nexus.2units.ru:8082/repository/distr/obraz/Navigator.qcow2
+curl --fail -u Tukhvatullin:Tuhvatullin53\!\!\! -O https://nexus.2units.ru:8082 (место для ссылки на архив)
+mv (нужно посмотреть куда он скачивает файлы и от туда плясать если в папку в которой ты находишься тогда mv не нужно если нет то юзаем)
+mkdir /mnt/VDI
+yum install unzip
+cd /mnt/VDI
+unzip VDI.zip
+
+######################################__Цикл_перебирающий_файлы_в_папке_с_добавлением_образов_в_киберинфраструктуру_##############################################
+
+#!/bin/bash
+
+# Путь к папке с файлами
+folder_path="/mnt/VDI"
+
+# Переменная для хранения имён файлов
+for file in "$folder_path"/*; do
+    if [ -f "$file" ]; then
+        # Извлечение имени файла без пути
+        filename=$(basename "$file")
+
+        # Вы полнение команды с использованием имени файла
+      vinfra service compute image create --file "$file" "$filename"
+
+     fi
+done
+###################################################################################################################################################################
+rm -rf /mnt/VDI
+
+#######______Развертывание кибер VDI______########
+##__Создание проекта__##
+vinfra domain create --enable VDI 
+vinfra domain project create --enable --domain VDI VDI
+##___Создание админа домена___##
+#!/bin/bash
+
+# Введите ваш пароль вместо 'your_password_here'
+PASSWORD="admin"
+
+# Передача пароля через стандартный ввод
+echo -e "$PASSWORD\n$PASSWORD" | vinfra domain user create --domain VDI --domain-permissions domain_admin --enable admin
+
+##########################################################################################################################
+##___Создание ssh-ключа на 1 хосте___#### ######______Решить проблему с паролем от vinfra______#####
+
+#!/bin/bash
+KEY_PATH="$HOME/.ssh/id_rsa"
+ssh-keygen -t rsa -b 4096 -N "" -f "$KEY_PATH" -q
+vinfra service compute key create ssh_rsa --public-key  /root/.ssh/id_rsa.pub --description /root/.ssh/id_rsa.pub
+
+##___Создание виртуальной сети___##
+vinfra service compute network create vdi_net --dhcp --cidr 172.20.1.0/24 --gateway 172.20.1.1 --dns-nameserver 8.8.8.8 --allocation-pool 172.20.1.5-172.20.1.250 --rbac-policies project:VDI:full
+##__Создание маршрутизатора__##
+vinfra service compute router create vdi_switch --external-gateway public --enable-snat --internal-interface vdi_net
+##__Создание плавающего IP__##
+vinfra service compute floatingip create --floating-ip 10.22.2.101 --network public
+
+##__Создание 3 ВМ БД__##
+vinfra service compute server create --key-name ssh_rsa --network id=vdi_net,fixed-ip=172.20.1.15 --flavor large vdi-mysql-1 --volume source=image,id=vdi-mysql-2024-04-02.qcow2,size=500
+vinfra service compute server create --key-name ssh_rsa --network id=vdi_net,fixed-ip=172.20.1.16 --flavor large vdi-mysql-2 --volume source=image,id=vdi-mysql-2024-04-02.qcow2,size=500
+vinfra service compute server create --key-name ssh_rsa --network id=vdi_net,fixed-ip=172.20.1.17 --flavor large vdi-mysql-3 --volume source=image,id=vdi-mysql-2024-04-02.qcow2,size=500
+##__Создание 2 ВМ тунели__##
+vinfra service compute server create --key-name ssh_rsa --network id=vdi_net,fixed-ip=172.20.1.20 --flavor large vdi-tunnel-1 --volume source=image,id=vdi-tunnel-2024-05-16.qcow2,size=100
+vinfra service compute server create --key-name ssh_rsa --network id=vdi_net,fixed-ip=172.20.1.21 --flavor large vdi-tunnel-2 --volume source=image,id=vdi-tunnel-2024-05-16.qcow2,size=100
+##__Создание 2 ВМ брокеры__##
+vinfra service compute server create --key-name ssh_rsa --network id=vdi_net,fixed-ip=172.20.1.18 --network id=public,fixed-ip=10.22.2.110 --flavor large vdi-server-1 --volume source=image,id=vdi-server-2024-05-30.qcow2,size=100
+vinfra service compute server create --key-name ssh_rsa --network id=vdi_net,fixed-ip=172.20.1.19 --network id=public,fixed-ip=10.22.2.111 --flavor large vdi-server-2 --volume source=image,id=vdi-server-2024-05-30.qcow2,size=100
+##__Создание ВМ конфигуратор__##
+vinfra service compute server create --key-name ssh_rsa --network id=vdi_net,fixed-ip=172.20.1.14 --network id=public,fixed-ip=10.22.1.100 --flavor large vdi-setup --volume source=image,id=vdi-setup-2024-04-20.qcow2,size=100
+
+##__Создание балансировщика нагрузки__##
+vinfra service compute load-balancer create --enable --floating-ip 10.22.2.101 --enable-ha vdi_balancer vdi_net
+##__Создание 4 пулов балансировки__##
+
+HTTPS-HTTPS 443-443 Брокеры
+vinfra service compute load-balancer pool create vdi_balancer --protocol HTTPS --port 443 --algorithm ROUND_ROBIN --backend-protocol HTTPS --backend-port 443 --healthmonitor type=TCP --member address=172.20.1.18,enabled=true --member address=172.20.1.19,enabled=true --enable --disable-sticky-session --name HTTPS-HTTPS
+нужно +- 30 секунд 
+HTTP-HTTP 80-80
+vinfra service compute load-balancer pool create vdi_balancer --protocol HTTP --port 80 --algorithm ROUND_ROBIN --backend-protocol HTTP --backend-port 80 --healthmonitor type=TCP --member address=172.20.1.18,enabled=true --member address=172.20.1.19,enabled=true --enable --disable-sticky-session --name HTTP-HTTP
+TCP-TCP 7777-7777 Тунели
+vinfra service compute load-balancer pool create vdi_balancer --protocol TCP --port 7777 --algorithm ROUND_ROBIN --backend-protocol TCP --backend-port 7777 --healthmonitor type=TCP --member address=172.20.1.20,enabled=true --member address=172.20.1.21,enabled=true --enable --disable-sticky-session --name TCP-TCP
+HTTPS-HTTPS 8080-8080
+vinfra service compute load-balancer pool create vdi_balancer --protocol HTTPS --port 8080 --algorithm SOURCE_IP --backend-protocol HTTPS --backend-port 8080 --healthmonitor type=TCP --member address=172.20.1.20,enabled=true --member address=172.20.1.21,enabled=true --enable --disable-sticky-session --name HTTPS-HTTPST
+##__Узнать можно ли через Ансибл залесть сначала на хост а потом на вм внутри хоста__##??? Приоритет 5
+
+############################__Не забудь__###############################
+|Для VDI мне нужно знать внутренние ip адреса каждой виртальной машины |
+|Для брокеров указать еще и public ip адреса                           |
+|configuration - 172.20.1.14 и плавающий ip 10.22.2.100                |
+|mysql - 172.20.1.15-17                                                |
+|broker - 172.20.1.18-19 10.22.2.110-111                               |
+|tunnel - 172.20.1.20-21                                               |
+########################################################################
