@@ -2,10 +2,10 @@
 #######################################################___________________Переменные__________________#########################################################
 #####____Глобальные переменные____####
 ssh_key="ssh_rsa" # название ssh ключа в проекте
-vinfra_password="PiGiqaap00" #Пароль от root кибера в домене Default
+vinfra_password="****" #Пароль от root кибера в домене Default
 domain_name="VDI" #Имя нового домена
 project_name="VDI" # Имя нового проекта
-PASSWORD="admin" # Пароль от админа домена
+PASSWORD="****" # Пароль от админа домена
 #_Сеть_#
 net_name="vdi_net" # название сети
 cidr="172.30.1.0/24" #CIDR
@@ -110,11 +110,11 @@ vinfra service compute server create --key-name $ssh_key --network id=$net_name 
 ##__Создание ВМ конфигуратор__##
 vinfra service compute server create --key-name $ssh_key --network id=$net_name --network id=public --flavor large vdi-setup --volume source=image,id=vdi-setup-2024-04-20.qcow2,size=100,rm=yes --wait
 ##__Создание балансировщика нагрузки__##
+float_ip=$(vinfra service compute floatingip list | grep -Eo "([0-9]{1,3}\.){3}[0-9]{1,3}")
 vinfra service compute load-balancer create --enable --floating-ip $float_ip --enable-ha $name_balnacer $net_name --wait
 ################################################################################################################################################################
 
 ##################________________Добавление IP адресов в переменные____________________#######################################
-float_ip=$(vinfra service compute floatingip list | grep -Eo "([0-9]{1,3}\.){3}[0-9]{1,3}")
 ip_mysql_1=$(vinfra service compute server show vdi-mysql-1 | awk '/ips:/{getline; print $4; exit}')
 ip_public_sql_1=$(vinfra service compute server show vdi-mysql-1 | sed -n '/ips:/,/mac_addr:/p' | grep -oP '(?<=- )\d+\.\d+\.\d+\.\d+' | sed -n '2p')
 ip_mysql_2=$(vinfra service compute server show vdi-mysql-2 | awk '/ips:/{getline; print $4; exit}')
